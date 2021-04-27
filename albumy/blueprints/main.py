@@ -19,6 +19,10 @@ from albumy.models import User, Photo, Tag, Follow, Collect, Comment, Notificati
 from albumy.notifications import push_comment_notification, push_collect_notification
 from albumy.utils import rename_image, resize_image, redirect_back, flash_errors
 
+##图片审核
+import requests
+import base64
+
 main_bp = Blueprint('main', __name__)
 
 
@@ -114,6 +118,23 @@ def get_avatar(filename):
     return send_from_directory(current_app.config['AVATARS_SAVE_PATH'], filename)
 
 
+def check_img(f):
+    request_url = "https://aip.baidubce.com/rest/2.0/solution/v1/img_censor/v2/user_defined"
+    img = base64.b64encode(f.read())
+
+    params = {"image": img}
+    access_token = '24.1371803591e252efed70dcbd1ac21047.2592000.1621492462.282335-24028472'
+    request_url = request_url + "?access_token=" + access_token
+    headers = {'content-type': 'application/x-www-form-urlencoded'}
+    response = requests.post(request_url, data=params, headers=headers)
+    if response:
+        if 'error_code' not in response.json():
+            conclusion = response.json()['conclusion']
+            if conclusion != '合规':
+                return  {"rlt":False, "msg": response.json()['data'][0]['msg']}
+            return {"rlt": True}
+    return {"rlt": False}
+
 @main_bp.route('/upload', methods=['GET', 'POST'])
 @login_required
 @confirm_required
@@ -121,6 +142,13 @@ def get_avatar(filename):
 def upload():
     if request.method == 'POST' and 'file' in request.files:
         f = request.files.get('file')
+        check_rlt = check_img(f)
+        if not check_rlt['rlt']:
+            if "msg" in check_rlt:
+                return "审核失败："+check_rlt['msg'], 400
+            return "上传出错！", 400
+
+
         filename = rename_image(f.filename)
         f.save(os.path.join(current_app.config['ALBUMY_UPLOAD_PATH'], filename))
         filename_s = resize_image(f, filename, current_app.config['ALBUMY_PHOTO_SIZE']['small'])
